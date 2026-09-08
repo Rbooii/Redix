@@ -1,10 +1,122 @@
 #include "CoreDB.hpp"
+#include "CoreDebug.hpp"
 #include <sstream>
 #include <stdlib.h>
 #include <cstdio>
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+
+bool aof_reopen_requested = false;
+std::queue<std::string> aof_queue;
+std::mutex aof_mutex;
+std::condition_variable aof_cv;
+bool aof_worker_running = true;
+std::thread aof_thread;
+
 db database(4);
+bool is_recovering = false;
+std::ofstream aof_file;
+
+void aof_background_worker()
+{
+  std::ofstream worker_file;
+  worker_file.open(AOF_PATH, std::ios::out | std::ios::app);
+
+  if (!worker_file.is_open())
+  {
+    reportErrorMessage("Background AOF worker failed to open file!", 0);
+    return;
+  }
+
+  while (1)
+  {
+    std::vector<std::string> local_batch;
+    bool do_reopen = false;
+    {
+      std::unique_lock<std::mutex> lock(aof_mutex);
+      aof_cv.wait(lock, []
+                  { return !aof_queue.empty() || !aof_worker_running || aof_reopen_requested; });
+
+    
+      if (aof_reopen_requested)
+      {
+        do_reopen = true;
+        aof_reopen_requested = false;
+      }
+
+      if (!aof_worker_running && aof_queue.empty())
+      {
+        break;
+      }
+      while (!aof_queue.empty())
+      {
+        local_batch.push_back(aof_queue.front());
+        aof_queue.pop();
+      }
+    }
+    if (do_reopen)
+    {
+      worker_file.close();
+      worker_file.open(AOF_PATH, std::ios::out | std::ios::app);
+      if (!worker_file.is_open())
+      {
+        reportErrorMessage("AOF worker failed to reopen file after rewrite! Aborting.", 1);
+        return;
+      }
+    }
+    for (const auto &resp_str : local_batch)
+    {
+      worker_file << resp_str;
+    }
+    worker_file.flush();
+  }
+
+  worker_file.close();
+}
+
+void init_aof()
+{
+  aof_thread = std::thread(aof_background_worker);
+}
+
+// gracefull shutdown
+void shutdown_aof()
+{
+  {
+    std::lock_guard<std::mutex> lock(aof_mutex);
+    aof_worker_running = false;
+  }
+
+  aof_cv.notify_one();
+
+  if (aof_thread.joinable())
+  {
+    aof_thread.join();
+  }
+}
+
+void append_cmd_aof(const std::vector<std::string> &cmd)
+{
+  std::string resp = "*" + std::to_string(cmd.size()) + "\r\n";
+  for (const auto &token : cmd)
+  {
+    resp += "$" + std::to_string(token.length()) + "\r\n" + token + "\r\n";
+  }
+
+  {
+    // Masukin data ke antrean dengan aman (Thread-safe)
+    std::lock_guard<std::mutex> lock(aof_mutex);
+    aof_queue.push(resp);
+  }
+
+  // Bangunkan background worker yang lagi tidur
+  aof_cv.notify_one();
+}
 
 static uint64_t get_time_ms()
 {
@@ -68,7 +180,7 @@ void main_thread_process_ttl(int limit)
       break;
     }
     std::string expired_key = min_node->data->key;
-    Delete(expired_key); 
+    Delete(expired_key);
     limit--;
   }
 }
@@ -162,7 +274,7 @@ AVLNode *removeNode(AVLNode *root, Node *k)
       {
         *root = *t;
       }
-      free(t);
+      delete t;
     }
     else
     {
@@ -434,6 +546,57 @@ std::vector<std::string> cmd_parse(const std::string &req)
   return tokens;
 }
 
+std::string build_resp_array(const std::vector<std::string> &args)
+{
+  std::string resp = "*" + std::to_string(args.size()) + "\r\n";
+  for (const auto &arg : args)
+  {
+    resp += "$" + std::to_string(arg.size()) + "\r\n" + arg + "\r\n";
+  }
+  return resp;
+}
+
+std::string rewrite_aof()
+{
+  std::lock_guard<std::mutex> lock(aof_mutex);
+  std::ofstream tmp_file(AOF_TEMP, std::ios::out | std::ios::trunc);
+  if (!tmp_file.is_open())
+    return "-ERR unable to open temp file\r\n";
+
+  for (int i = 0; i < (database.isMigrating ? 2 : 1); i++)
+  {
+    for (size_t j = 0; j < database.htx[i].CAP; j++)
+    {
+      Node *curr = database.htx[i].table[j];
+      while (curr)
+      {
+        if (curr->expire_at == 0 || curr->expire_at > get_time_ms())
+        {
+          std::vector<std::string> set_cmd = {"SET", curr->key, curr->value};
+          tmp_file << build_resp_array(set_cmd);
+          if (curr->expire_at > 0)
+          {
+            uint64_t remain_ms = curr->expire_at - get_time_ms();
+            uint64_t remain_sec = (remain_ms / 1000) + 1; // Pembulatan ke atas
+            std::vector<std::string> exp_cmd = {"EXPIRE", curr->key, std::to_string(remain_sec)};
+            tmp_file << build_resp_array(exp_cmd);
+          }
+        }
+        curr = curr->next;
+      }
+    }
+  }
+  tmp_file.close();
+  while (!aof_queue.empty())
+  {
+    aof_queue.pop();
+  }
+  std::rename(AOF_TEMP, AOF_PATH);
+  aof_reopen_requested = true;
+  aof_cv.notify_one();
+  return "+OK\r\n";
+}
+
 std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
 {
   if (parsed_cmd.empty())
@@ -451,6 +614,8 @@ std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
     int q = Insert(parsed_cmd[1], parsed_cmd[2]);
     if (q == 1 || q == 2 || q == 3)
     {
+      if ((q == 1 || q == 2) && !is_recovering)
+        append_cmd_aof(parsed_cmd);
       return "+OK\r\n"; // RESP Simple String (sukses)
     }
     else
@@ -486,6 +651,8 @@ std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
     if (del_query)
     {
       // RESP Integer: :<angka>\r\n
+      if (!is_recovering)
+        append_cmd_aof(parsed_cmd);
       return ":1\r\n";
     }
     else
@@ -505,7 +672,13 @@ std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
     }
     actualNode->expire_at = get_time_ms() + (ttl_sec * 1000);
     database.ttl_tree = insertNode(database.ttl_tree, actualNode);
+    if (!is_recovering)
+      append_cmd_aof(parsed_cmd);
     return ":1\r\n";
+  }
+  else if (db_operand == "bgrewriteaof" && parsed_cmd.size() == 1)
+  {
+    return rewrite_aof();
   }
   else
   {

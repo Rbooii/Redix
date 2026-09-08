@@ -58,5 +58,5 @@ or simpy just run
 - [x] Basic command protocol (parsing text commands from clients streams)
 - [x] Implement Data structures (hashmap) for stroing key and values efficiently
 - [x] In-memory key-value store with SET/GET/DEL using a custom Hash Map
-- [ ] TTL / key expiry
-- [ ] Simple persistence (snapshot to disk)
+- [x] TTL / key expiry
+- [x] Simple persistence (snapshot to disk)

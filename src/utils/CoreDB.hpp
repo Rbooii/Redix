@@ -1,8 +1,12 @@
 #ifndef COREDB_H
 #define COREDB_H
 
+#include <cstdint>
 #include <vector>
 #include <string>
+
+#define AOF_PATH "../presistence/redix.aof"
+#define AOF_TEMP "../presistence/redix.aof.tmp"
 
 typedef struct Node {
     std::string key;
@@ -59,13 +63,20 @@ bool Delete(const std::string &key);
 void resize_hash_init();
 void rehash_one();
 void main_thread_process_ttl(int limit);
+void init_aof();
+void shutdown_aof();
+void append_cmd_aof(const std::vector<std::string> &cmd);
+void aof_background_worker();
 
 extern db database;
+extern bool is_recovering;
 
 //placeholder map for storing data in memory
 //static std::unordered_map<std::string, std::string> db;
 //literally ambil -> set nama arco -> ['set', 'nama', 'arco'] as Vector string
 std::vector<std::string> cmd_parse(const std::string &req);
+std::string build_resp_array(const std::vector<std::string>& args);
 std::string cmd_exec(const std::vector<std::string> &parsed_cmd);
+std::string rewrite_aof();
 
 #endif
