@@ -9,7 +9,6 @@
 #include <fcntl.h>
 #include <vector>
 #include <sys/event.h>
-#include <fstream>
 #include <signal.h> 
 
 // Core-Header
@@ -60,8 +59,7 @@ void load_aof()
         std::vector<std::string> cmd;
         int32_t consumed = parse_resp(&buffer[current_pos], read_bytes - current_pos, cmd);
 
-        if (consumed > 0)
-        {
+        if (consumed > 0){
             cmd_exec(cmd);
             current_pos += consumed;
             commands_loaded++;
@@ -85,13 +83,27 @@ void load_aof()
 //  reset-aof(0/1) 
 int main(int argc, char *argv[])
 {
+    uint16_t server_port = PORT;
+    bool reset_aof = false;
+
+    std::vector<ServerFlags> flags = serverCLIArgsCheck(argc, argv);
+    ApplyCLIFlags(flags, server_port, reset_aof);
+
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
-
-
     printASCII();
-    printf("Server code running at port:%d...\n", PORT);
+    printf("Server code running at port:%d...\n", server_port);
+
+    if (reset_aof)
+    {
+        reportMessageNonError("Reset AOF requested. Truncating persistence file...");
+        FILE *fp = fopen(AOF_PATH, "wb");
+        if (fp)
+            fclose(fp);
+        else
+            reportErrorMessage("Failed to reset AOF file", 0);
+    }
 
     printf("Loading data from disk...\n");
     is_recovering = true;  
@@ -111,7 +123,7 @@ int main(int argc, char *argv[])
 
     struct sockaddr_in server_addr = {};
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_port = htons(server_port);
     server_addr.sin_addr.s_addr = htonl(0);
     int rv = bind(fd, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     if (rv)
