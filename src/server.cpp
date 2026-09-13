@@ -28,7 +28,7 @@ void handle_signal(int sig) {
 
 void load_aof()
 {
-    FILE *fp = fopen(AOF_PATH, "rb");
+    FILE *fp = fopen(AOF_PATH.c_str(), "rb");
     if (!fp)
     {
         printf("AOF file not found. Starting with empty database.\n");
@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
     if (reset_aof)
     {
         reportMessageNonError("Reset AOF requested. Truncating persistence file...");
-        FILE *fp = fopen(AOF_PATH, "wb");
+        FILE *fp = fopen(AOF_PATH.c_str(), "wb");
         if (fp)
             fclose(fp);
         else

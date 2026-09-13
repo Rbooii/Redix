@@ -12,6 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(redix
     src/main.cpp
     src/utils/CoreDebug.cpp
+    src/utils/CoreIO.cpp
+    src/utils/CoreDB.cpp
 )
 target_include_directories(redix PRIVATE src src/utils)
 

@@ -5,8 +5,10 @@
 #include <vector>
 #include <string>
 
-#define AOF_PATH "../presistence/redix.aof"
-#define AOF_TEMP "../presistence/redix.aof.tmp"
+// "../presistence/redix.aof" "../presistence/redix.aof.tmp"
+
+extern std::string AOF_PATH;
+extern std::string AOF_TEMP;
 
 typedef struct Node {
     std::string key;

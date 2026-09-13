@@ -1,4 +1,5 @@
 #include "CoreDebug.hpp" 
+#include "CoreDB.hpp"
 #include <cstdio>     
 #include <cstdlib>   
 #include <charconv>
@@ -75,6 +76,14 @@ void ApplyCLIFlags(const std::vector<ServerFlags> &FLAGS,
             else{
                 reportErrorMessage(("Invalid value for -r (expected 0/1): " + flag.flagValue).c_str(), 1);
             }
+        }
+        else if(flag.flag == "-d"){
+            if(flag.flagValue.empty()){
+                reportErrorMessage("Missing value for -d (expected PATH to presistance folder)", 1);
+            }
+            std::string path = flag.flagValue;
+            AOF_PATH = path;
+            AOF_TEMP = path + ".tmp";
         }
         else{
             reportMessageNonError(("Unknown flag ignored: " + flag.flag).c_str());

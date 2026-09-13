@@ -1,5 +1,6 @@
 #include "CoreDB.hpp"
 #include "CoreDebug.hpp"
+#include <iostream>
 #include <sstream>
 #include <stdlib.h>
 #include <cstdio>
@@ -21,6 +22,9 @@ std::thread aof_thread;
 db database(4);
 bool is_recovering = false;
 std::ofstream aof_file;
+
+std::string AOF_PATH = "../presistence/redix.aof";
+std::string AOF_TEMP = "../presistence/redix.aof.tmp";
 
 void aof_background_worker()
 {
@@ -87,6 +91,7 @@ void init_aof()
 // gracefull shutdown
 void shutdown_aof()
 {
+  std::cout << rewrite_aof() << std::endl;
   {
     std::lock_guard<std::mutex> lock(aof_mutex);
     aof_worker_running = false;
@@ -591,7 +596,7 @@ std::string rewrite_aof()
   {
     aof_queue.pop();
   }
-  std::rename(AOF_TEMP, AOF_PATH);
+  std::rename(AOF_TEMP.c_str(), AOF_PATH.c_str());
   aof_reopen_requested = true;
   aof_cv.notify_one();
   return "+OK\r\n";

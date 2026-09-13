@@ -3,6 +3,7 @@ build/
 *.obj
 *.exe
 *.out
+*.aof
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
