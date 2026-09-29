@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <algorithm>
 #include <sstream>
 #include <string>
 
@@ -200,13 +201,18 @@ bool try_one_req(Conn *conn){
         return false;
     }
 
-    std::string res_text = cmd_exec(cmd);
+    std::string res_text = cmd_exec(cmd, conn);
     //feedback
-    printf("Client Command > ");
-    for(int x = 0; x < cmd.size(); x++){
-        printf("%s ", cmd[x].c_str());
+    std::string op = cmd.empty() ? "" : cmd[0];
+    std::transform(op.begin(), op.end(), op.begin(), ::tolower);
+    printf("Client Command -> ");
+    if(op == "auth") printf("AUTH ******\n");
+    else {
+        for(size_t x = 0; x < cmd.size(); x++){
+            printf("%s ", cmd[x].c_str());
+        }
     }
-    printf("\n Server Response > %s", res_text.c_str());
+    printf("\n Server Response -> %s", res_text.c_str());
 
 
     //respond

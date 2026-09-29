@@ -22,6 +22,7 @@ typedef struct Conn {
     size_t wbuf_size = 0;
     size_t wbuf_sent = 0;
     uint8_t wbuf[4+MAX_MESSAGE_LEN];
+    bool authenticated = false;
 } Conn ;
 
 int32_t read_full(int fd, char *buf, size_t n);

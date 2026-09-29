@@ -58,3 +58,5 @@ or simpy just run
 - [x] Custom Hash Map with separate chaining and incremental rehashing
 - [x] TTL / key expiry (AVL tree with lazy + active expiration)
 - [x] Async AOF persistence (background writer + compaction/rewrite)
+- [x] add Authentication
+- [ ] Make a driver for Typescript usage

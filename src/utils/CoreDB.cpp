@@ -1,5 +1,6 @@
 #include "CoreDB.hpp"
 #include "CoreDebug.hpp"
+#include "CoreIO.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdlib.h>
@@ -23,8 +24,9 @@ db database(4);
 bool is_recovering = false;
 std::ofstream aof_file;
 
-std::string AOF_PATH = "../presistence/redix.aof";
-std::string AOF_TEMP = "../presistence/redix.aof.tmp";
+std::string AOF_PATH = "./redix.aof";
+std::string AOF_TEMP = "./redix.aof.tmp";
+std::string requirepass;
 
 void aof_background_worker()
 {
@@ -46,7 +48,6 @@ void aof_background_worker()
       aof_cv.wait(lock, []
                   { return !aof_queue.empty() || !aof_worker_running || aof_reopen_requested; });
 
-    
       if (aof_reopen_requested)
       {
         do_reopen = true;
@@ -121,6 +122,18 @@ void append_cmd_aof(const std::vector<std::string> &cmd)
 
   // Bangunkan background worker yang lagi tidur
   aof_cv.notify_one();
+}
+
+static bool secret_equal(const std::string &a, const std::string &b)
+{
+  if (a.size() != b.size())
+    return false;
+  unsigned char diff = 0;
+  for (size_t i = 0; i < a.size(); i++)
+  {
+    diff |= (unsigned char)(a[i] ^ b[i]);
+  }
+  return diff == 0;
 }
 
 static uint64_t get_time_ms()
@@ -602,7 +615,7 @@ std::string rewrite_aof()
   return "+OK\r\n";
 }
 
-std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
+std::string cmd_exec(const std::vector<std::string> &parsed_cmd, Conn *conn)
 {
   if (parsed_cmd.empty())
     return "-ERR empty command\r\n"; // RESP Error
@@ -610,6 +623,17 @@ std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
   std::string db_operand = parsed_cmd[0];
   // Convert command ke lowercase case-insensitive (SET, set, Set bakal valid semua)
   std::transform(db_operand.begin(), db_operand.end(), db_operand.begin(), ::tolower);
+
+  bool internal = (conn == nullptr);
+  bool logged_in = internal || requirepass.empty() || conn->authenticated;
+  bool allowed = (db_operand == "auth" ||
+                  db_operand == "hello" ||
+                  db_operand == "quit" ||
+                  db_operand == "reset");
+  if (!logged_in && !allowed)
+  {
+    return "-NOAUTH Authentication required.\r\n";
+  }
 
   if (db_operand == "set" && (parsed_cmd.size() == 3 || parsed_cmd.size() == 5))
   {
@@ -681,9 +705,54 @@ std::string cmd_exec(const std::vector<std::string> &parsed_cmd)
       append_cmd_aof(parsed_cmd);
     return ":1\r\n";
   }
+  else if (db_operand == "auth" && (parsed_cmd.size() == 2 || parsed_cmd.size() == 3))
+  {
+    if (requirepass.empty())
+    {
+      return "-ERR Client sent AUTH, but no password is set. Did you mean AUTH <username> <password>?\r\n";
+    }
+    const std::string &user = (parsed_cmd.size() == 3) ? parsed_cmd[1] : "default";
+    const std::string &pass = parsed_cmd.back();
+    if (user == "default" && secret_equal(pass, requirepass))
+    {
+      if (conn)
+        conn->authenticated = true;
+      return "+OK\r\n";
+    }
+    else
+    {
+      return "-WRONGPASS invalid username-password pair or user is disabled.\r\n";
+    }
+  }
+  else if (db_operand == "auth")
+  {
+    return "-ERR wrong number of arguments for 'auth' command\r\n";
+  }
   else if (db_operand == "bgrewriteaof" && parsed_cmd.size() == 1)
   {
     return rewrite_aof();
+  }
+  else if (db_operand == "ping" && parsed_cmd.size() <= 2)
+  {
+    if (parsed_cmd.size() == 2)
+      return "$" + std::to_string(parsed_cmd[1].size()) + "\r\n" + parsed_cmd[1] + "\r\n";
+    return "+PONG\r\n";
+  }
+  else if (db_operand == "select" && parsed_cmd.size() == 2)
+  {
+    return (parsed_cmd[1] == "0") ? "+OK\r\n" : "-ERR DB index is out of range\r\n";
+  }
+  else if (db_operand == "client" && parsed_cmd.size() >= 2)
+  {
+    std::string sub = parsed_cmd[1];
+    std::transform(sub.begin(), sub.end(), sub.begin(), ::tolower);
+    if (sub == "setname" && parsed_cmd.size() == 3)
+      return "+OK\r\n";
+    if (sub == "getname")
+      return "$0\r\n\r\n";
+    if (sub == "setinfo" && parsed_cmd.size() == 4)
+      return "+OK\r\n";
+    return "-ERR unknown subcommand '" + parsed_cmd[1] + "'. Try CLIENT HELP.\r\n";
   }
   else
   {

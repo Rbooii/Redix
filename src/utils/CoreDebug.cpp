@@ -85,6 +85,12 @@ void ApplyCLIFlags(const std::vector<ServerFlags> &FLAGS,
             AOF_PATH = path;
             AOF_TEMP = path + ".tmp";
         }
+        else if(flag.flag == "--requirepass"){
+            if(flag.flagValue.empty()){
+                reportErrorMessage("Missing value for --requirepass", 1);
+            }
+            requirepass = flag.flagValue;
+        }
         else{
             reportMessageNonError(("Unknown flag ignored: " + flag.flag).c_str());
         }

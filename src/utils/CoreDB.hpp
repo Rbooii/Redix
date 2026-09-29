@@ -6,7 +6,9 @@
 #include <string>
 
 // "../presistence/redix.aof" "../presistence/redix.aof.tmp"
+struct Conn;
 
+extern std::string requirepass;
 extern std::string AOF_PATH;
 extern std::string AOF_TEMP;
 
@@ -78,7 +80,7 @@ extern bool is_recovering;
 //literally ambil -> set nama arco -> ['set', 'nama', 'arco'] as Vector string
 std::vector<std::string> cmd_parse(const std::string &req);
 std::string build_resp_array(const std::vector<std::string>& args);
-std::string cmd_exec(const std::vector<std::string> &parsed_cmd);
+std::string cmd_exec(const std::vector<std::string> &parsed_cmd, Conn *conn = nullptr);
 std::string rewrite_aof();
 
 #endif
