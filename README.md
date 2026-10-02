@@ -59,4 +59,14 @@ or simpy just run
 - [x] TTL / key expiry (AVL tree with lazy + active expiration)
 - [x] Async AOF persistence (background writer + compaction/rewrite)
 - [x] add Authentication
-- [ ] Make a driver for Typescript usage
+- [x] Make a driver for Typescript usage
+
+## Redix Typescript Client Roadmap
+
+- [x]  Setup package. 
+- [x]  Encoder RESP. 
+- [x]  Decoder RESP (tersulit). 
+- [ ]  Connection state machine + reconnect. 
+- [ ]  Queue & Promise pairing + offline queue. 
+- [ ]  API ber-tipe + error taxonomy. 
+- [ ]  Tests, build, docs. 
