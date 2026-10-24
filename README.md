@@ -66,7 +66,7 @@ or simpy just run
 - [x]  Setup package. 
 - [x]  Encoder RESP. 
 - [x]  Decoder RESP (tersulit). 
-- [ ]  Connection state machine + reconnect. 
+- [x]  Connection state machine + reconnect. 
 - [ ]  Queue & Promise pairing + offline queue. 
 - [ ]  API ber-tipe + error taxonomy. 
 - [ ]  Tests, build, docs. 
