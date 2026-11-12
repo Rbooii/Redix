@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+build
+.cache
+.DS_Store
+demo-video
+readme-assets
+refer_DS
+ts-driver
+*.aof
+*.aof.tmp
+presistence

@@ -1,0 +1,17 @@
+services:
+  redix:
+    build: .
+    image: redix:local
+    container_name: redix
+    command: ["-p", "3333", "-d", "/data/redix.aof"]
+    # For a password, replace the command above with:
+    # command: ["-p", "3333", "-d", "/data/redix.aof", "--requirepass", "${REDIX_PASSWORD}"]
+    ports:
+      - "3333:3333"
+    volumes:
+      - redix-data:/data
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+volumes:
+  redix-data:
