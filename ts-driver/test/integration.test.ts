@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
@@ -81,15 +80,14 @@ async function stopServer(
   directory: string,
 ): Promise<void> {
   if (child.exitCode === null) {
-    child.kill("SIGTERM");
-    await Promise.race([
-      once(child, "exit"),
-      new Promise((resolve) => setTimeout(resolve, 3000)),
-    ]);
-    if (child.exitCode === null) {
-      child.kill("SIGKILL");
-      await once(child, "exit");
-    }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => child.kill("SIGKILL"), 3000);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill("SIGTERM");
+    });
   }
   await rm(directory, { recursive: true, force: true });
 }
