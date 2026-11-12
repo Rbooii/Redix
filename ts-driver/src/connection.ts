@@ -16,6 +16,7 @@ export type ConnectionEvents = {
   ready: [];
   reply: [RespReply];
   error: [Error];
+  disconnect: [Error | null];
   reconnecting: [number];
   close: [];
   state: [ConnectionState];
@@ -28,6 +29,7 @@ export class Connection extends EventEmitter<ConnectionEvents> {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private inbox = Buffer.alloc(0);
   private manuallyClosed = false;
+  private lastError: Error | null = null;
   private connectPromise: Promise<void> | null = null;
   private connectResolve: (() => void) | null = null;
   private connectReject: ((err: Error) => void) | null = null;
@@ -81,6 +83,7 @@ export class Connection extends EventEmitter<ConnectionEvents> {
   private openSocket(): void {
     this.setState("connecting");
     this.inbox = Buffer.alloc(0);
+    this.lastError = null;
 
     const socket = net.createConnection({
       host: this.options.host,
@@ -102,15 +105,23 @@ export class Connection extends EventEmitter<ConnectionEvents> {
 
     socket.on("data", (chunk: Buffer) => {
       this.inbox = Buffer.concat([this.inbox, chunk]);
-      for (;;) {
-        const parsed = tryParseReply(this.inbox);
-        if (!parsed) break;
-        this.inbox = this.inbox.subarray(parsed.consumed);
-        this.emit("reply", parsed.reply);
+      try {
+        for (;;) {
+          const parsed = tryParseReply(this.inbox);
+          if (!parsed) break;
+          this.inbox = this.inbox.subarray(parsed.consumed);
+          this.emit("reply", parsed.reply);
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        this.lastError = error;
+        this.emit("error", error);
+        socket.destroy();
       }
     });
 
     socket.on("error", (err: Error) => {
+      this.lastError = err;
       this.emit("error", err);
     });
 
@@ -120,6 +131,7 @@ export class Connection extends EventEmitter<ConnectionEvents> {
         this.setState("end");
         this.emit("close");
       } else {
+        this.emit("disconnect", this.lastError);
         this.scheduleReconnect();
       }
     });

@@ -1,22 +1,25 @@
-import { Connection } from "./connection.js";
-import { encodeCommand } from "./encoder.js";
+import { Redix } from "./client.js";
 
-const conn = new Connection({
+const redix = new Redix({
     host: "127.0.0.1",
     port: 3333,
+    // password: "secret",
     initialReconnectDelay: 200,
     maxReconnectDelay: 3000,
-    reconnectFactor: 2
-})
+    reconnectFactor: 2,
+});
 
-conn.on("state", (s) => console.log("[state]", s));
-conn.on("error", (e) => console.log("[error]", e.message));
-conn.on("reconnecting", (delay) => console.log(`[reconnect] coba lagi dalam ${delay}ms`));
-conn.on("reply", (reply) => console.log("[reply]", reply));
-conn.on("ready", () => console.log("[ready] terhubung"));
-conn.on("close", () => console.log("[close] selesai"));
+redix.on("state", (s) => console.log("[state]", s));
+redix.on("error", (e) => console.log("[error]", e.message));
+redix.on("reconnecting", (delay) => console.log(`[reconnect] coba lagi dalam ${delay}ms`));
+redix.on("ready", () => console.log("[ready] terhubung"));
+redix.on("close", () => console.log("[close] selesai"));
 
-await conn.connect();
+await redix.connect();
+await redix.set("playground", "hello from typescript");
+console.log("[get]", await redix.get("playground"));
+console.log("[ping]", await redix.ping());
+
 setInterval(() => {
-  if (conn.currentState === "ready") conn.write(encodeCommand(["PING"]));
+  void redix.ping().catch((err: Error) => console.log("[ping error]", err.message));
 }, 2000);
