@@ -8,13 +8,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <vector>
-#include <sys/event.h>
 #include <signal.h> 
 
 // Core-Header
 #include "CoreDebug.hpp"
 #include "CoreIO.hpp"
 #include "CoreDB.hpp"
+#include "CoreEventLoop.hpp"
 
 #define PORT 3333
 #define MAX_EVENTS 1024
@@ -136,42 +136,33 @@ int main(int argc, char *argv[])
     std::vector<Conn *> fd2conn;
     fd_set_nb(fd);
 
-    int kq = kqueue();
-    if (kq == -1)
-        reportErrorMessage("kqueue creation failed", 1);
+    EventLoop event_loop;
+    if (!event_loop.init())
+        reportErrorMessage("event loop creation failed", 1);
 
-    struct kevent change_event;
-    EV_SET(&change_event, fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
-    if (kevent(kq, &change_event, 1, NULL, 0, NULL) == -1)
-    {
-        reportErrorMessage("kevent initial registration failed", 1);
-    }
+    if (!event_loop.add(fd))
+        reportErrorMessage("event loop initial registration failed", 1);
 
-    struct kevent event_list[MAX_EVENTS]; // Buffer penampung event yang meledak
+    std::vector<PollEvent> event_list(MAX_EVENTS);
 
-    printf("Redix kqueue event loop started!\n");
+    printf("Redix event loop started!\n");
 
     while (server_running)
     {
-        // Setup timeout untuk kevent
-        struct timespec timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_nsec = 0;
+        // Event loop ngeblock disini sampai ada I/O atau timeout 1 detik
+        int nev = event_loop.wait(event_list, 1000);
 
-        // kqueue ngeblock disini sampai ada I/O atau timeout 1 detik
-        int nev = kevent(kq, NULL, 0, event_list, MAX_EVENTS, &timeout);
-       
         if (nev < 0)
         {
             if (errno == EINTR) {
-                continue; 
+                continue;
             }
-            reportErrorMessage("kevent polling error", 1);
+            reportErrorMessage("event loop polling error", 1);
         }
 
         for (int i = 0; i < nev; i++)
         {
-            int current_fd = event_list[i].ident;
+            int current_fd = event_list[i].fd;
 
             if (current_fd == fd)
             {
@@ -184,10 +175,9 @@ int main(int argc, char *argv[])
                         if (fd2conn[idx] && fd2conn[idx]->state == STATE_REQ)
                         {
                             int new_client_fd = fd2conn[idx]->fd;
-                            // Daftarkan socket client baru ini ke kqueue
-                            struct kevent client_event;
-                            EV_SET(&client_event, new_client_fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL);
-                            kevent(kq, &client_event, 1, NULL, 0, NULL);
+                            // Daftarkan socket client baru ini ke event loop
+                            if (!event_loop.add(new_client_fd))
+                                reportMessageNonError("failed to register client fd");
                             break;
                         }
                     }
@@ -201,7 +191,7 @@ int main(int argc, char *argv[])
                     continue;
 
                 // Kalau ada event EOF (client disconnect)
-                if (event_list[i].flags & EV_EOF)
+                if (event_list[i].eof)
                 {
                     conn->state = STATE_END;
                 }
@@ -214,23 +204,17 @@ int main(int argc, char *argv[])
                 if (conn->state == STATE_RES)
                 {
                     // Berhenti monitor READ, mulai monitor WRITE
-                    struct kevent modify_event[2];
-                    EV_SET(&modify_event[0], current_fd, EVFILT_READ, EV_DISABLE, 0, 0, NULL);
-                    EV_SET(&modify_event[1], current_fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, NULL);
-                    kevent(kq, modify_event, 2, NULL, 0, NULL);
+                    event_loop.set_write(current_fd);
                 }
                 else if (conn->state == STATE_REQ)
                 {
                     // Berhenti monitor WRITE, kembali monitor READ
-                    struct kevent modify_event[2];
-                    EV_SET(&modify_event[0], current_fd, EVFILT_WRITE, EV_DISABLE, 0, 0, NULL);
-                    EV_SET(&modify_event[1], current_fd, EVFILT_READ, EV_ENABLE, 0, 0, NULL);
-                    kevent(kq, modify_event, 2, NULL, 0, NULL);
+                    event_loop.set_read(current_fd);
                 }
 
                 if (conn->state == STATE_END)
                 {
-                    // Client putus. kqueue otomatis ngehapus fd yang di-close dari pantauan
+                    // Client putus. Event loop otomatis ngehapus fd yang di-close dari pantauan
                     fd2conn[conn->fd] = NULL;
                     (void)close(conn->fd);
                     delete (conn);
@@ -240,6 +224,8 @@ int main(int argc, char *argv[])
 
         main_thread_process_ttl(100);
     }
+
+    event_loop.close_loop();
 
     printf("\nClosing sockets...\n");
     close(fd); // Tutup server socket
