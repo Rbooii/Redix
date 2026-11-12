@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  driver:
+    name: Driver (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: ts-driver
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: ts-driver/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  server:
+    name: Server (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ts-driver/package-lock.json
+
+      - name: Install driver dependencies
+        working-directory: ts-driver
+        run: npm ci
+
+      - name: Driver + server integration tests
+        working-directory: ts-driver
+        env:
+          REDIX_SERVER_BIN: ../build/redix-server
+        run: npm test
+
+      - name: Server smoke test
+        shell: bash
+        run: |
+          ./build/redix-server -p 3333 -d "$RUNNER_TEMP/redix-ci.aof" > "$RUNNER_TEMP/redix-ci.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill -TERM "$SERVER_PID" 2>/dev/null || true' EXIT
+          sleep 1
+          node scripts/smoke-test.mjs
+          kill -TERM "$SERVER_PID"
+          wait "$SERVER_PID"
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [driver, server]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build image
+        run: docker build -t redix:ci .
+
+      - name: Run container
+        run: docker run -d --name redix-ci -p 3333:3333 redix:ci
+
+      - name: Container smoke test
+        run: |
+          sleep 1
+          node scripts/smoke-test.mjs
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f redix-ci || true
